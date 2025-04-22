@@ -1,4 +1,4 @@
-name: Public Nightly Build
+name: Internal Nightly Build
 
 on:
   schedule:
@@ -18,18 +18,16 @@ permissions:
   actions: read
 
 jobs:
-  build-nightly:
-    # we dont build nightly release from internal repo
-    # but allowing adhoc build for cache purposes
-    if: github.repository == 'oxy-hq/oxy'
-    name: Build Nightly CLI for ${{ matrix.job.target }}
+  build-internal:
+    name: Build internal CLI for ${{ matrix.job.target }}
+    concurrency:
+      group: oxy-intenral-nightly-build-${{ github.ref_name  }}-${{ matrix.job.os }}-${{ matrix.job.target }}
+      cancel-in-progress: true
     runs-on: ${{ matrix.job.os }}
     strategy:
       fail-fast: false
       matrix:
         job:
-          - os: macos-13
-            target: x86_64-apple-darwin
           - os: macos-latest
             target: aarch64-apple-darwin
           - os: ubuntu-22.04
@@ -58,6 +56,10 @@ jobs:
       - name: Create artifacts folder
         run: mkdir -p artifacts
 
+      - uses: rui314/setup-mold@v1
+        if: runner.os == 'Linux'
+        with:
+          make-default: true
       - name: Prep Rust
         uses: dtolnay/rust-toolchain@stable
         with:
@@ -66,7 +68,7 @@ jobs:
       - name: Prep cargo cache
         uses: Swatinem/rust-cache@v2
         with:
-          shared-key: build-cli-${{ matrix.job.os }}-${{ matrix.job.target }}
+          shared-key: build-cli
           cache-all-crates: "true"
 
       # protobuf is required by lance https://github.com/lancedb/lance/issues/3073
@@ -74,11 +76,6 @@ jobs:
         uses: arduino/setup-protoc@v3
         with:
           repo-token: ${{ steps.app-token.outputs.token }}
-
-      # cleanup disk space
-      - name: Free Disk Space (Ubuntu)
-        if: ${{ startsWith(matrix.job.os, 'ubuntu') }}
-        uses: jlumbroso/free-disk-space@main
 
       #-- Prep node
       - name: Prep Node
@@ -126,7 +123,7 @@ jobs:
         id: date
         run: echo "current_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
 
-      - name: Publish nightly release
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ steps.app-token.outputs.token }}
@@ -138,4 +135,4 @@ jobs:
           files: artifacts/**/*
           body: |
             Rolling internal build triggered at ${{ steps.date.outputs.current_date }}. Please use with caution.
-            Commit: [${{ steps.checkout.outputs.ref }}](https://github.com/oxy-internal/commit/${{ steps.checkout.outputs.ref }})
+            Commit: [${{ steps.checkout.outputs.commit }}](https://github.com/oxy-hq/oxy-internal/commit/${{ steps.checkout.outputs.commit }})

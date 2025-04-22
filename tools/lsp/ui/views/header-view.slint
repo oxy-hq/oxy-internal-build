@@ -1,0 +1,120 @@
+// Copyright © SixtyFPS GmbH <info@slint.dev>
+// SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+
+import { Button, HorizontalBox, Switch, Palette, ComboBox } from "std-widgets.slint";
+import { BodyText } from "../components/body-text.slint";
+import { HeaderText } from "../components/header-text.slint";
+import { Api, ComponentItem } from "../api.slint";
+import { EditorSpaceSettings, Icons } from "../components/styling.slint";
+
+
+export component HeaderView {
+    in-out property <bool> show-left-sidebar <=> left-panel-button.checked;
+    in-out property <bool> show-right-sidebar <=> right-panel-button.checked;
+    in-out property <bool> edit-mode <=> interaction-switch.checked;
+    in-out property <string> current-style <=> style-combobox.current-value;
+    in property <[string]> known-styles <=> style-combobox.model;
+
+    callback style-selected();
+    callback edit-mode-toggled();
+
+    background-layer := Rectangle {
+        background: Palette.alternate-background;
+
+        content-layer := HorizontalBox {
+            horizontal-stretch: 1;
+
+            HorizontalLayout {
+                alignment: start;
+                horizontal-stretch: 0;
+                spacing: EditorSpaceSettings.default-spacing / 2;
+
+                Button {
+                    icon: Icons.sync;
+                    colorize-icon: true;
+                    clicked => {
+                        Api.reload-preview();
+                    }
+                }
+
+                HeaderText {
+                    text: @tr("Preview");
+                }
+            }
+
+            HorizontalLayout {
+                alignment: start;
+                spacing: EditorSpaceSettings.default-spacing;
+
+                HorizontalLayout {
+                    visible: false;
+                    spacing: EditorSpaceSettings.default-spacing / 2;
+                    horizontal-stretch: 1;
+
+                    BodyText {
+                        text: @tr("Interact");
+                    }
+
+                    interaction-switch := Switch {
+                        checked: true;
+                        toggled => {
+                            root.edit-mode-toggled();
+                        }
+                    }
+
+                    BodyText {
+                        text: @tr("Edit");
+                    }
+                }
+                @children
+
+                left-panel-button := Button {
+                    horizontal-stretch: 0;
+
+                    checkable: true;
+                    icon: self.checked ? Icons.sidebar-left : Icons.sidebar-left-off;
+                    colorize-icon: true;
+                }
+
+                right-panel-button := Button {
+                    horizontal-stretch: 0;
+
+                    checkable: true;
+                    icon: self.checked ? Icons.sidebar-right : Icons.sidebar-right-off;
+                    colorize-icon: true;
+                    // visible: root.edit-mode;
+                }
+            }
+
+            HorizontalLayout {
+                alignment: end;
+                spacing:4px;
+
+                BodyText {
+                    horizontal-stretch: 0;
+
+                    visible: Api.uses-widgets;
+                    horizontal-alignment: right;
+                    text: @tr("Style");
+                }
+
+                style-combobox := ComboBox {
+                    horizontal-stretch: 0;
+
+                    visible: Api.uses-widgets;
+
+                    selected => {
+                        root.style-selected();
+                    }
+                }
+            }
+        }
+
+        Rectangle {
+            y: parent.height - self.height;
+            height: 1px;
+
+            background: Palette.border;
+        }
+    }
+}

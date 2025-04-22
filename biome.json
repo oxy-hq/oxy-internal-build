@@ -1,0 +1,54 @@
+{
+    "$schema": "https://biomejs.dev/schemas/1.9.4/schema.json",
+    "formatter": {
+        "enabled": true,
+        "formatWithErrors": false,
+        "indentStyle": "space",
+        "indentWidth": 4,
+        "lineEnding": "lf",
+        "attributePosition": "auto",
+        "ignore": [
+            "./node_modules",
+            "**/.vscode/**",
+            "*.json",
+            "**/dist/**",
+            "!biome.json",
+            "editors/vscode/out/**"
+        ]
+    },
+    "organizeImports": { "enabled": false },
+    "linter": {
+        "enabled": true,
+        "ignore": ["api/node/docs/assets/**", "**/dist/**"],
+        "rules": {
+            "recommended": false,
+            "complexity": {
+                "noBannedTypes": "warn",
+                "noUselessConstructor": "error"
+            },
+            "style": {
+                "useBlockStatements": "warn",
+                "noUselessElse": "off",
+                "useConst": "error",
+                "useImportType": "error",
+                "useNodejsImportProtocol": "error"
+            },
+            "suspicious": {
+                "noDoubleEquals": "error",
+                "noRedundantUseStrict": "warn",
+                "noImplicitAnyLet": "error"
+            }
+        }
+    },
+    "javascript": {
+        "formatter": {
+            "jsxQuoteStyle": "double",
+            "quoteProperties": "asNeeded",
+            "semicolons": "always",
+            "bracketSpacing": true,
+            "bracketSameLine": false,
+            "quoteStyle": "double",
+            "attributePosition": "auto"
+        }
+    }
+}
