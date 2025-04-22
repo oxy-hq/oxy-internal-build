@@ -1,0 +1,14 @@
+# Copyright © SixtyFPS GmbH <info@slint.dev>
+# SPDX-License-Identifier: GPL-3.0-only OR LicenseRef-Slint-Royalty-free-2.0 OR LicenseRef-Slint-Software-3.0
+packages:
+  - "api/node"
+  - "editors/vscode"
+  - "tools/figma-inspector"
+  - "tools/slintpad"
+  - "demos/printerdemo/node"
+  - "demos/home-automation/node"
+  - "examples/imagefilter/node"
+  - "examples/carousel/node"
+  - "examples/todo/node"
+  - "examples/memory"
+  - "docs/astro"
