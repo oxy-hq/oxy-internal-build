@@ -1,0 +1,9 @@
+{
+    "extends": ["../../biome.json"],
+    "formatter": {
+        "ignore": ["**/.vscode/**"]
+    },
+    "linter": {
+        "ignore": ["webviews/**", "**/.vscode/**", "**/build/**", "**/out/**"]
+    }
+}
