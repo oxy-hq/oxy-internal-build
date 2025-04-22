@@ -1,0 +1,127 @@
+name: Publish Docker Images
+
+on:
+  schedule:
+    - cron: "0 8 * * *" # Runs every day at midnight Bay Area time (UTC-8)
+  workflow_dispatch:
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  packages: write
+  contents: read
+  attestations: write
+  id-token: write
+
+jobs:
+  build-and-publish-docker:
+    concurrency:
+      group: docker-publish-${{ matrix.arch }}-${{ github.ref_name }}
+      cancel-in-progress: true
+    runs-on: ${{ matrix.arch == 'linux/amd64' && 'ubuntu-latest' || 'ubuntu-24.04-arm' }}
+    strategy:
+      fail-fast: true
+      matrix:
+        arch: [linux/amd64, linux/arm64]
+    steps:
+      - uses: actions/create-github-app-token@v2
+        name: Create GitHub App Token
+        id: app-token
+        with:
+          app-id: ${{ vars.ARGO_APP_ID }}
+          private-key: ${{ secrets.ARGO_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            oxy-internal
+            oxy-internal-build
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        id: checkout
+        with:
+          fetch-depth: 0
+          repository: oxy-hq/oxy-internal
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get current date
+        id: date
+        run: echo "current_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+      - name: Get short SHA
+        id: short_sha
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Build and push ${{ matrix.arch }} image
+        run: |
+          DATE_TAG=${{ steps.date.outputs.current_date }}
+          SHA_TAG=${{ steps.short_sha.outputs.short_sha }}
+          ARCH_TAG=$(echo "${{ matrix.arch }}" | awk -F'/' '{print $2}')
+          docker build -t ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG .
+          docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG
+          docker build -t ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG .
+          docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG
+          docker build -t ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$ARCH_TAG .
+          docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$ARCH_TAG
+
+  create-and-push-manifest:
+    needs: build-and-publish-docker
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - uses: actions/create-github-app-token@v2
+        name: Create GitHub App Token
+        id: app-token
+        with:
+          app-id: ${{ vars.ARGO_APP_ID }}
+          private-key: ${{ secrets.ARGO_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            oxy-internal
+            oxy-internal-build
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          repository: oxy-hq/oxy-internal
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get current date
+        id: date
+        run: echo "current_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+      - name: Get short SHA
+        id: short_sha
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
+      - name: Create and push multi-arch manifest
+        run: |
+          docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }} \
+            ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}-amd64 \
+            ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}-arm64
+          docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}
+
+          docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }} \
+            ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-amd64 \
+            ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-arm64
+          docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}
+
+          docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:latest \
+            ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-amd64 \
+            ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-arm64
+          docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:latest

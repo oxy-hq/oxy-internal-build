@@ -1,0 +1,28 @@
+{
+    "extends": ["../../biome.json"],
+    "formatter": {
+        "ignore": ["rust-module.d.cts", "rust-module.cjs", "dist/", "docs/"]
+    },
+    "linter": {
+        "ignore": ["dist/", "docs/"],
+        "rules": {
+            "complexity": {
+                "useArrowFunction": "off",
+                "noForEach": "off"
+            },
+            "style": {
+                "noNonNullAssertion": "off",
+                "noUnusedTemplateLiteral": "off",
+                "useTemplate": "off",
+                "noArguments": "off",
+                "noVar": "off",
+                "noInferrableTypes": "off",
+                "noParameterAssign": "off"
+            },
+            "suspicious": {
+                "noExplicitAny": "off",
+                "noAssignInExpressions": "off"
+            }
+        }
+    }
+}
