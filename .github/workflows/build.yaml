@@ -1,0 +1,141 @@
+name: Public Nightly Build
+
+on:
+  schedule:
+    - cron: "0 8 * * *" # Runs every day at midnight Bay Area time (UTC-8)
+  workflow_dispatch:
+
+env:
+  CARGO_TERM_COLOR: always
+  MACOSX_DEPLOYMENT_TARGET: "11.0"
+
+defaults:
+  run:
+    shell: bash
+
+permissions:
+  contents: write
+  actions: read
+
+jobs:
+  build-nightly:
+    # we dont build nightly release from internal repo
+    # but allowing adhoc build for cache purposes
+    if: github.repository == 'oxy-hq/oxy'
+    name: Build Nightly CLI for ${{ matrix.job.target }}
+    runs-on: ${{ matrix.job.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        job:
+          - os: macos-13
+            target: x86_64-apple-darwin
+          - os: macos-latest
+            target: aarch64-apple-darwin
+          - os: ubuntu-22.04
+            target: x86_64-unknown-linux-gnu
+          - os: ubuntu-22.04-arm
+            target: aarch64-unknown-linux-gnu
+    steps:
+      - uses: actions/create-github-app-token@v2
+        name: Create GitHub App Token
+        id: app-token
+        with:
+          app-id: ${{ vars.ARGO_APP_ID }}
+          private-key: ${{ secrets.ARGO_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            oxy-internal
+            oxy-internal-build
+
+      - uses: actions/checkout@v4
+        id: checkout
+        with:
+          fetch-depth: 0
+          repository: oxy-hq/oxy-internal
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Create artifacts folder
+        run: mkdir -p artifacts
+
+      - name: Prep Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable
+          targets: ${{ matrix.job.target }}
+      - name: Prep cargo cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          shared-key: build-cli-${{ matrix.job.os }}-${{ matrix.job.target }}
+          cache-all-crates: "true"
+
+      # protobuf is required by lance https://github.com/lancedb/lance/issues/3073
+      - name: Install Protoc
+        uses: arduino/setup-protoc@v3
+        with:
+          repo-token: ${{ steps.app-token.outputs.token }}
+
+      # cleanup disk space
+      - name: Free Disk Space (Ubuntu)
+        if: ${{ startsWith(matrix.job.os, 'ubuntu') }}
+        uses: jlumbroso/free-disk-space@main
+
+      #-- Prep node
+      - name: Prep Node
+        uses: actions/setup-node@v4
+        id: setup-node
+        with:
+          node-version: lts/*
+
+      - uses: pnpm/action-setup@v4
+        with:
+          run_install: false
+
+      - name: Get pnpm store directory
+        shell: bash
+        run: |
+          echo "STORE_PATH=$(pnpm store path --silent)" >> $GITHUB_ENV
+      - uses: actions/cache@v4
+        name: Setup pnpm cache
+        with:
+          path: ${{ env.STORE_PATH }}
+          key: pnpm-store-${{ matrix.job.os }}-${{ matrix.job.target }}-${{ hashFiles('**/pnpm-lock.yaml') }}
+          restore-keys: |
+            pnpm-store-${{ matrix.job.os }}-${{ matrix.job.target }}
+      - name: Install dependencies & Build web-app
+        env:
+          NODE_OPTIONS: "--max_old_space_size=4096"
+        run: |
+          pnpm install --prefer-frozen-lockfile
+          pnpm -C web-app build
+
+      - name: Build oxy cli
+        shell: bash
+        run: |
+          cargo build --release --target ${{ matrix.job.target }}
+          mv target/${{ matrix.job.target }}/release/oxy artifacts/oxy-${{ matrix.job.target }}
+
+      - name: Generate config schema (once)
+        if: ${{ matrix.job.target == 'aarch64-apple-darwin' }}
+        run: |
+          cargo run --release --target ${{ matrix.job.target }} -- gen-config-schema
+          cp -a json-schemas/. artifacts/
+          cp Cargo.lock artifacts/
+
+      - name: Get current date
+        id: date
+        run: echo "current_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+      - name: Publish nightly release
+        uses: softprops/action-gh-release@v2
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+          draft: false
+          prerelease: false
+          make_latest: true
+          tag_name: rolling_${{ steps.date.outputs.current_date }}
+          name: Rolling Internal Build ${{ steps.date.outputs.current_date }}
+          files: artifacts/**/*
+          body: |
+            Rolling internal build triggered at ${{ steps.date.outputs.current_date }}. Please use with caution.
+            Commit: [${{ steps.checkout.outputs.ref }}](https://github.com/oxy-internal/commit/${{ steps.checkout.outputs.ref }})
