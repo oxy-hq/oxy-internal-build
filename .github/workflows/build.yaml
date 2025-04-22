@@ -1,4 +1,4 @@
-name: Public Nightly Build
+name: Internal Nightly Build
 
 on:
   schedule:
@@ -18,11 +18,8 @@ permissions:
   actions: read
 
 jobs:
-  build-nightly:
-    # we dont build nightly release from internal repo
-    # but allowing adhoc build for cache purposes
-    if: github.repository == 'oxy-hq/oxy'
-    name: Build Nightly CLI for ${{ matrix.job.target }}
+  build-internal:
+    name: Build internal CLI for ${{ matrix.job.target }}
     runs-on: ${{ matrix.job.os }}
     strategy:
       fail-fast: false
@@ -126,7 +123,7 @@ jobs:
         id: date
         run: echo "current_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
 
-      - name: Publish nightly release
+      - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           token: ${{ steps.app-token.outputs.token }}
