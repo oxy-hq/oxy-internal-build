@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 8 * * *" # Runs every day at midnight Bay Area time (UTC-8)
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to checkout from oxy-hq/oxy-internal'
+        required: false
+        default: 'main'
 
 env:
   CARGO_TERM_COLOR: always
@@ -52,6 +57,7 @@ jobs:
           fetch-depth: 0
           repository: oxy-hq/oxy-internal
           token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.event.inputs.branch || 'main' }}
 
       - name: Create artifacts folder
         run: mkdir -p artifacts
@@ -130,8 +136,8 @@ jobs:
           draft: false
           prerelease: false
           make_latest: true
-          tag_name: rolling_${{ steps.date.outputs.current_date }}
-          name: Rolling Internal Build ${{ steps.date.outputs.current_date }}
+          tag_name: rolling_${{ steps.date.outputs.current_date }}_${{ github.event.inputs.branch || 'main' }}
+          name: Rolling Internal Build ${{ steps.date.outputs.current_date }} (${{ github.event.inputs.branch || 'main' }})
           files: artifacts/**/*
           body: |
             Rolling internal build triggered at ${{ steps.date.outputs.current_date }}. Please use with caution.

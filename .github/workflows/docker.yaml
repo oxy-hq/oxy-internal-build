@@ -4,6 +4,11 @@ on:
   schedule:
     - cron: "0 8 * * *" # Runs every day at midnight Bay Area time (UTC-8)
   workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to checkout from oxy-hq/oxy-internal'
+        required: false
+        default: 'main'
 
 defaults:
   run:
@@ -44,6 +49,7 @@ jobs:
           fetch-depth: 0
           repository: oxy-hq/oxy-internal
           token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.event.inputs.branch || 'main' }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v3
@@ -65,12 +71,13 @@ jobs:
           DATE_TAG=${{ steps.date.outputs.current_date }}
           SHA_TAG=${{ steps.short_sha.outputs.short_sha }}
           ARCH_TAG=$(echo "${{ matrix.arch }}" | awk -F'/' '{print $2}')
-          docker build -t ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG .
-          docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG
-          docker build -t ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG .
-          docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG
-          docker build -t ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$ARCH_TAG .
-          docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$ARCH_TAG
+            BRANCH_TAG="${{ github.event.inputs.branch || 'main' }}"
+            docker build -t ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG-$BRANCH_TAG .
+            docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG-$BRANCH_TAG
+            docker build -t ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG-$BRANCH_TAG .
+            docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG-$BRANCH_TAG
+            docker build -t ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$ARCH_TAG-$BRANCH_TAG .
+            docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$ARCH_TAG-$BRANCH_TAG
 
   create-and-push-manifest:
     needs: build-and-publish-docker
@@ -111,17 +118,18 @@ jobs:
 
       - name: Create and push multi-arch manifest
         run: |
-          docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }} \
-            ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}-amd64 \
-            ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}-arm64
-          docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}
+            BRANCH_TAG="${{ github.event.inputs.branch || 'main' }}"
+            docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}-$BRANCH_TAG \
+              ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}-amd64-$BRANCH_TAG \
+              ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}-arm64-$BRANCH_TAG
+            docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}-$BRANCH_TAG
 
-          docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }} \
-            ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-amd64 \
-            ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-arm64
-          docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}
+            docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-$BRANCH_TAG \
+              ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-amd64-$BRANCH_TAG \
+              ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-arm64-$BRANCH_TAG
+            docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-$BRANCH_TAG
 
-          docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:latest \
-            ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-amd64 \
-            ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-arm64
-          docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:latest
+            docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$BRANCH_TAG \
+              ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-amd64-$BRANCH_TAG \
+              ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-arm64-$BRANCH_TAG
+            docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$BRANCH_TAG
