@@ -71,13 +71,19 @@ jobs:
           DATE_TAG=${{ steps.date.outputs.current_date }}
           SHA_TAG=${{ steps.short_sha.outputs.short_sha }}
           ARCH_TAG=$(echo "${{ matrix.arch }}" | awk -F'/' '{print $2}')
-            BRANCH_TAG="${{ github.event.inputs.branch || 'main' }}"
-            docker build -t ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG-$BRANCH_TAG .
-            docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG-$BRANCH_TAG
-            docker build -t ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG-$BRANCH_TAG .
-            docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG-$BRANCH_TAG
-            docker build -t ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$ARCH_TAG-$BRANCH_TAG .
-            docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$ARCH_TAG-$BRANCH_TAG
+          BRANCH_TAG="${{ github.event.inputs.branch || 'main' }}"
+          docker build \
+            --build-arg VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }} \
+            -t ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG-$BRANCH_TAG .
+          docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG-$BRANCH_TAG
+          docker build \
+            --build-arg VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }} \
+            -t ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG-$BRANCH_TAG .
+          docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG-$BRANCH_TAG
+          docker build \
+            --build-arg VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }} \
+            -t ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$ARCH_TAG-$BRANCH_TAG .
+          docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$ARCH_TAG-$BRANCH_TAG
 
   create-and-push-manifest:
     needs: build-and-publish-docker
