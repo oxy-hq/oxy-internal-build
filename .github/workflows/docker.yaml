@@ -80,10 +80,6 @@ jobs:
             --build-arg VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }} \
             -t ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG-$BRANCH_TAG .
           docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG-$BRANCH_TAG
-          docker build \
-            --build-arg VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }} \
-            -t ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$ARCH_TAG-$BRANCH_TAG .
-          docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$ARCH_TAG-$BRANCH_TAG
 
   create-and-push-manifest:
     needs: build-and-publish-docker
@@ -134,8 +130,3 @@ jobs:
               ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-amd64-$BRANCH_TAG \
               ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-arm64-$BRANCH_TAG
             docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-$BRANCH_TAG
-
-            docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$BRANCH_TAG \
-              ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-amd64-$BRANCH_TAG \
-              ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-arm64-$BRANCH_TAG
-            docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:latest-$BRANCH_TAG
