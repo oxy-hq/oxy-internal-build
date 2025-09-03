@@ -6,9 +6,9 @@ on:
   workflow_dispatch:
     inputs:
       branch:
-        description: 'Branch to checkout from oxy-hq/oxy-internal'
+        description: "Branch to checkout from oxy-hq/oxy-internal"
         required: false
-        default: 'main'
+        default: "main"
 
 defaults:
   run:
@@ -21,7 +21,41 @@ permissions:
   id-token: write
 
 jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      current_date: ${{ steps.date.outputs.current_date }}
+      short_sha: ${{ steps.short_sha.outputs.short_sha }}
+    steps:
+      - uses: actions/create-github-app-token@v2
+        name: Create GitHub App Token
+        id: app-token
+        with:
+          app-id: ${{ vars.ARGO_APP_ID }}
+          private-key: ${{ secrets.ARGO_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: |
+            oxy-internal
+            oxy-internal-build
+
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          repository: oxy-hq/oxy-internal
+          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.event.inputs.branch || 'main' }}
+
+      - name: Get current date
+        id: date
+        run: echo "current_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
+
+      - name: Get short SHA
+        id: short_sha
+        run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+
   build-and-publish-docker:
+    needs: prepare
     concurrency:
       group: docker-publish-${{ matrix.arch }}-${{ github.ref_name }}
       cancel-in-progress: true
@@ -58,32 +92,48 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get current date
-        id: date
-        run: echo "current_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
-
-      - name: Get short SHA
-        id: short_sha
-        run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
-
       - name: Build and push ${{ matrix.arch }} image
         run: |
-          DATE_TAG=${{ steps.date.outputs.current_date }}
-          SHA_TAG=${{ steps.short_sha.outputs.short_sha }}
-          ARCH_TAG=$(echo "${{ matrix.arch }}" | awk -F'/' '{print $2}')
+          set -euo pipefail
+          DATE_TAG=${{ needs.prepare.outputs.current_date }}
+          SHA_TAG=${{ needs.prepare.outputs.short_sha }}
           BRANCH_TAG="${{ github.event.inputs.branch || 'main' }}"
-          docker build \
-            --build-arg VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }} \
+          ARCH_TAG=$(echo "${{ matrix.arch }}" | awk -F'/' '{print $2}')
+
+          # Build and push the date-tagged image, capture push output
+          docker build --build-arg VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }} \
             -t ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG-$BRANCH_TAG .
-          docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG-$BRANCH_TAG
-          docker build \
-            --build-arg VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }} \
+          DATE_PUSH_OUTPUT=$(docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG-$BRANCH_TAG 2>&1 || true)
+          DATE_DIGEST=$(echo "$DATE_PUSH_OUTPUT" | grep -Eo 'sha256:[0-9a-f]+' | head -1 || true)
+          if [ -z "$DATE_DIGEST" ]; then
+            echo "digest not found in push output for date tag; trying docker manifest inspect fallback"
+            DATE_DIGEST=$(docker manifest inspect ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$ARCH_TAG-$BRANCH_TAG 2>/dev/null | grep -Eo 'sha256:[0-9a-f]+' | head -1 || true)
+          fi
+
+          # Build and push the SHA-tagged image, capture push output
+          docker build --build-arg VITE_SENTRY_DSN=${{ vars.VITE_SENTRY_DSN }} \
             -t ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG-$BRANCH_TAG .
-          docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG-$BRANCH_TAG
+          SHA_PUSH_OUTPUT=$(docker push ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG-$BRANCH_TAG 2>&1 || true)
+          SHA_DIGEST=$(echo "$SHA_PUSH_OUTPUT" | grep -Eo 'sha256:[0-9a-f]+' | head -1 || true)
+          if [ -z "$SHA_DIGEST" ]; then
+            echo "digest not found in push output for sha tag; trying docker manifest inspect fallback"
+            SHA_DIGEST=$(docker manifest inspect ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$ARCH_TAG-$BRANCH_TAG 2>/dev/null | grep -Eo 'sha256:[0-9a-f]+' | head -1 || true)
+          fi
+
+          echo "DATE_DIGEST=${DATE_DIGEST}" > ./digests.txt
+          echo "SHA_DIGEST=${SHA_DIGEST}" >> ./digests.txt
+          echo "ARCH=${ARCH_TAG}" >> ./digests.txt
+          echo "Wrote digests.txt:" && cat ./digests.txt
+
+      - name: Upload digests artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: digests-${{ matrix.arch == 'linux/amd64' && 'amd64' || 'arm64' }}
+          path: ./digests.txt
 
   create-and-push-manifest:
-    needs: build-and-publish-docker
-    runs-on: ubuntu-24.04-arm
+    needs: [prepare, build-and-publish-docker]
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/create-github-app-token@v2
         name: Create GitHub App Token
@@ -110,23 +160,88 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Get current date
-        id: date
-        run: echo "current_date=$(date -u +'%Y%m%d')" >> $GITHUB_OUTPUT
+      - name: Download digests (amd64)
+        uses: actions/download-artifact@v4
+        with:
+          name: digests-amd64
+          path: ./digests/amd64
 
-      - name: Get short SHA
-        id: short_sha
-        run: echo "short_sha=$(git rev-parse --short HEAD)" >> $GITHUB_OUTPUT
+      - name: Download digests (arm64)
+        uses: actions/download-artifact@v4
+        with:
+          name: digests-arm64
+          path: ./digests/arm64
 
-      - name: Create and push multi-arch manifest
+      - name: Create and push multi-arch manifest (by digest, with backoff)
         run: |
-            BRANCH_TAG="${{ github.event.inputs.branch || 'main' }}"
-            docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}-$BRANCH_TAG \
-              ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}-amd64-$BRANCH_TAG \
-              ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}-arm64-$BRANCH_TAG
-            docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.date.outputs.current_date }}-$BRANCH_TAG
+          set -euo pipefail
+          DATE_TAG=${{ needs.prepare.outputs.current_date }}
+          SHA_TAG=${{ needs.prepare.outputs.short_sha }}
+          BRANCH_TAG="${{ github.event.inputs.branch || 'main' }}"
 
-            docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-$BRANCH_TAG \
-              ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-amd64-$BRANCH_TAG \
-              ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-arm64-$BRANCH_TAG
-            docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:${{ steps.short_sha.outputs.short_sha }}-$BRANCH_TAG
+          AMD64_FILE=./digests/amd64/digests.txt
+          ARM64_FILE=./digests/arm64/digests.txt
+
+          if [ ! -f "$AMD64_FILE" ] || [ ! -f "$ARM64_FILE" ]; then
+            echo "Missing digest artifacts"
+            ls -la ./digests || true
+            exit 1
+          fi
+
+          AMD64_DATE_DIGEST=$(grep '^DATE_DIGEST=' "$AMD64_FILE" | cut -d'=' -f2- || true)
+          AMD64_SHA_DIGEST=$(grep '^SHA_DIGEST=' "$AMD64_FILE" | cut -d'=' -f2- || true)
+          ARM64_DATE_DIGEST=$(grep '^DATE_DIGEST=' "$ARM64_FILE" | cut -d'=' -f2- || true)
+          ARM64_SHA_DIGEST=$(grep '^SHA_DIGEST=' "$ARM64_FILE" | cut -d'=' -f2- || true)
+
+          if [ -z "$AMD64_DATE_DIGEST" ] || [ -z "$ARM64_DATE_DIGEST" ] || [ -z "$AMD64_SHA_DIGEST" ] || [ -z "$ARM64_SHA_DIGEST" ]; then
+            echo "One or more digests are empty"
+            echo "AMD64_DATE_DIGEST=$AMD64_DATE_DIGEST"
+            echo "ARM64_DATE_DIGEST=$ARM64_DATE_DIGEST"
+            echo "AMD64_SHA_DIGEST=$AMD64_SHA_DIGEST"
+            echo "ARM64_SHA_DIGEST=$ARM64_SHA_DIGEST"
+            exit 1
+          fi
+
+          ensure_digest_visible() {
+            local ref="$1"
+            local attempt=0
+            local max_attempts=7
+            while true; do
+              if docker manifest inspect "$ref" >/dev/null 2>&1; then
+                echo "visible: $ref"
+                return 0
+              fi
+              attempt=$((attempt+1))
+              if [ $attempt -ge $max_attempts ]; then
+                echo "ERROR: $ref not visible after $attempt attempts"
+                return 1
+              fi
+              sleep_secs=$((2 ** attempt))
+              echo "waiting $sleep_secs seconds for $ref (attempt $attempt/$max_attempts)"
+              sleep $sleep_secs
+            done
+          }
+
+          AMD64_DATE_REF=ghcr.io/${{ github.repository_owner }}/oxy-internal@${AMD64_DATE_DIGEST}
+          ARM64_DATE_REF=ghcr.io/${{ github.repository_owner }}/oxy-internal@${ARM64_DATE_DIGEST}
+
+          AMD64_SHA_REF=ghcr.io/${{ github.repository_owner }}/oxy-internal@${AMD64_SHA_DIGEST}
+          ARM64_SHA_REF=ghcr.io/${{ github.repository_owner }}/oxy-internal@${ARM64_SHA_DIGEST}
+
+          ensure_digest_visible "$AMD64_DATE_REF"
+          ensure_digest_visible "$ARM64_DATE_REF"
+
+          docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$BRANCH_TAG \
+            "$AMD64_DATE_REF" "$ARM64_DATE_REF"
+          docker manifest annotate ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$BRANCH_TAG "$AMD64_DATE_REF" --os linux --arch amd64 || true
+          docker manifest annotate ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$BRANCH_TAG "$ARM64_DATE_REF" --os linux --arch arm64 || true
+          docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:$DATE_TAG-$BRANCH_TAG
+
+          ensure_digest_visible "$AMD64_SHA_REF"
+          ensure_digest_visible "$ARM64_SHA_REF"
+
+          docker manifest create ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$BRANCH_TAG \
+            "$AMD64_SHA_REF" "$ARM64_SHA_REF"
+          docker manifest annotate ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$BRANCH_TAG "$AMD64_SHA_REF" --os linux --arch amd64 || true
+          docker manifest annotate ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$BRANCH_TAG "$ARM64_SHA_REF" --os linux --arch arm64 || true
+          docker manifest push ghcr.io/${{ github.repository_owner }}/oxy-internal:$SHA_TAG-$BRANCH_TAG
